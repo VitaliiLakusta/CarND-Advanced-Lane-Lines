@@ -110,6 +110,13 @@ testRoadImgFnames = glob.glob('test_images/test*.jpg')
 testRoadImages = list(map(lambda fname: mpimg.imread(fname), testRoadImgFnames))
 show_images(testRoadImages, testRoadImgFnames)
 
+# %% [markdown]
+## Undistort Images
+
+#%% 
+testRoadImagesUndist = list(map(lambda img: cv2.undistort(img, mtx, dist, None, mtx), testRoadImages))
+show_images(testRoadImagesUndist, testRoadImgFnames, save=False, save_prefix='undistorted_')
+
 
 # %%
 def absoluteSobelThresh(img, orient='x', sobelKernel=3, thresh=(0,255)):
@@ -184,12 +191,12 @@ def combinedGradAndColorThresh(img, debug=False):
 
 
 # %%
-threshImgsDebug = list(map(lambda img: combinedGradAndColorThresh(img, debug=True), testRoadImages))
+threshImgsDebug = list(map(lambda img: combinedGradAndColorThresh(img, debug=True), testRoadImagesUndist))
 show_images(threshImgsDebug, testRoadImgFnames, save=False, save_prefix='combinedThreshDebug_')
 
 
 # %%
-threshImgs = list(map(lambda img: combinedGradAndColorThresh(img), testRoadImages))
+threshImgs = list(map(lambda img: combinedGradAndColorThresh(img), testRoadImagesUndist))
 show_images(threshImgs, testRoadImgFnames)
 
 # %% [markdown]
@@ -211,7 +218,7 @@ def getTrapezoid():
 def drawTrapezoid(img):
     return cv2.polylines(np.copy(img), [getTrapezoid()], True, (255,0,0), thickness=2)
 
-imgsWithTrapezoid = list(map(lambda img: drawTrapezoid(img), testRoadImages))
+imgsWithTrapezoid = list(map(lambda img: drawTrapezoid(img), testRoadImagesUndist))
 show_images(imgsWithTrapezoid, testRoadImgFnames)
 
 
@@ -224,7 +231,7 @@ dstPerspective = np.float32([(X-200, Y), (200, Y), (200, 0), (X-200, 0)])
 M = cv2.getPerspectiveTransform(srcPerspective, dstPerspective)
 MInv = cv2.getPerspectiveTransform(dstPerspective, srcPerspective)
 
-warpedOriginal = list(map(lambda img: cv2.warpPerspective(img, M, (X, Y), flags=cv2.INTER_LINEAR), testRoadImages))
+warpedOriginal = list(map(lambda img: cv2.warpPerspective(img, M, (X, Y), flags=cv2.INTER_LINEAR), testRoadImagesUndist))
 show_images(warpedOriginal, testRoadImgFnames, save=False, save_prefix='warpedOriginal_')
 
 
@@ -342,7 +349,6 @@ def drawLane(undistImage, binaryWarped, Minv, leftFitX, rightFitX, plotY):
 
 fittedLanes = list(map(lambda warped: fitPolynomial(warped), warpedImgs))
 imgsWithLanes = []
-imgWithLane = drawLane(testRoadImages[1], warpedImgs[1], MInv, leftFitX, rightFitX, plotY)
 for i in range(len(testRoadImages)):
     imgsWithLanes.append(drawLane(testRoadImages[i], warpedImgs[i], MInv, fittedLanes[i][0], fittedLanes[i][1], fittedLanes[i][2]))
 
