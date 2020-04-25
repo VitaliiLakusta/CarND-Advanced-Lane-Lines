@@ -313,14 +313,13 @@ def fitPolynomial(warpedImg):
 
 
 # %%
-
 leftX, leftY, rightX, rightY, imgWithLanePixels = findLanePixels(warpedImgs[1])
 show_images([imgWithLanePixels], [testRoadImgFnames[1]], save=False, save_prefix='laneRectanglesAdjusted_')
 
 
 # %%
 leftFitX, rightFitX, plotY, imgWithPoly = fitPolynomial(warpedImgs[1])
-show_images([imgWithPoly], [testRoadImgFnames[1]], save=True, save_prefix='fitPoly_')
+show_images([imgWithPoly], [testRoadImgFnames[1]], save=False, save_prefix='fitPoly_')
 
 # %%
 
@@ -341,7 +340,12 @@ def drawLane(undistImage, binaryWarped, Minv, leftFitX, rightFitX, plotY):
 
 # %% 
 
+fittedLanes = list(map(lambda warped: fitPolynomial(warped), warpedImgs))
+imgsWithLanes = []
 imgWithLane = drawLane(testRoadImages[1], warpedImgs[1], MInv, leftFitX, rightFitX, plotY)
-show_images([imgWithLane], [testRoadImgFnames[1]], save=True, save_prefix='laneFinal_')
+for i in range(len(testRoadImages)):
+    imgsWithLanes.append(drawLane(testRoadImages[i], warpedImgs[i], MInv, fittedLanes[i][0], fittedLanes[i][1], fittedLanes[i][2]))
+
+show_images(imgsWithLanes, testRoadImgFnames, save=False, save_prefix='laneOnRoad_')
 
 # %%
