@@ -354,4 +354,24 @@ for i in range(len(testRoadImages)):
 
 show_images(imgsWithLanes, testRoadImgFnames, save=False, save_prefix='laneOnRoad_')
 
+# %% [markdown]
+## Find lanes on video
+
+#%% 
+# TODO: write process image function
+def processImage(img):
+    return img
+
+# %%
+
+from moviepy.editor import VideoFileClip
+from IPython.display import HTML
+
+# %%
+
+outputFname1 = 'output_videos/project_video.mp4'
+clip1 = VideoFileClip('project_video.mp4')
+processedClip1 = clip1.fl_image(processImage)
+processedClip1.write_videofile(outputFname1, audio=False)
+
 # %%
