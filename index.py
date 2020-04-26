@@ -407,19 +407,36 @@ class Line():
         #y values for detected line pixels
         self.ally = None
 
-    def measureCurvatureRadiusOfCurrentFit(self):
+    def measureCurvatureRadiusAndLineBasePos(self, imgShape):
         ym_per_pix = 30/720
         xm_per_pix = 3.7/700
         fit_cr = np.polyfit(self.ploty*ym_per_pix, self.last_xfitted*xm_per_pix, 2)
         y_eval = np.max(self.ploty)
         self.radius_of_curvature = ((1 + (2*fit_cr[0]*y_eval*ym_per_pix+fit_cr[1])**2)**(3/2)) / abs(2*fit_cr[0])
 
+        xSizeMeters = imgShape[1]*xm_per_pix
+        midX = xSizeMeters // 2
+        lineStartYInMeters = np.max(self.ploty*ym_per_pix)
+        lineStartXInMeters = fit_cr[0]*lineStartYInMeters**2 + fit_cr[1]*lineStartYInMeters + fit_cr[2]
+        self.line_base_pos = abs(midX - lineStartXInMeters)
 
 # TODO: calculate position of a vehicle with respect to lane's center
 class LaneFinder():
     def __init__(self):
         self.leftLine = Line()
         self.rightLine = Line()
+        self.vehicleCenterOffset = None
+
+    def calculateVehicleCenterOffset(self):
+        self.vehicleCenterOffset = self.leftLine.line_base_pos - self.rightLine.line_base_pos
+
+    def formatVehiclePosition(self):
+        text = "Vehicle is " + str(round(self.vehicleCenterOffset, 2)) + "m "
+        leftOrRight = "left"
+        if self.vehicleCenterOffset > 0:
+            leftOrRight = "right"
+        text = text + leftOrRight + " of center"
+        return text
 
     def processNextFrame(self, img):
         undist = cv2.undistort(img, mtx, dist, None, mtx)
@@ -443,16 +460,19 @@ class LaneFinder():
         self.leftLine.detected = True
         self.rightLine.detected = True
 
-        self.leftLine.measureCurvatureRadiusOfCurrentFit()
-        self.rightLine.measureCurvatureRadiusOfCurrentFit()
+        self.leftLine.measureCurvatureRadiusAndLineBasePos(img.shape)
+        self.rightLine.measureCurvatureRadiusAndLineBasePos(img.shape)
+
+        self.calculateVehicleCenterOffset()
 
         imgWithLane = drawLane(undist, warped, MInv, leftFitX, rightFitX, plotY)
 
         # print("L " + str(self.leftLine.radius_of_curvature) + " R " + str(self.rightLine.radius_of_curvature))
         radiusOfCurvatureMean = np.mean([self.leftLine.radius_of_curvature, self.rightLine.radius_of_curvature])
 
-        text = 'Radius of Curvature = ' + str(radiusOfCurvatureMean) + '(m)'
-        cv2.putText(imgWithLane, text, (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
+        curvatureText = 'Radius of Curvature = ' + str(round(radiusOfCurvatureMean, 2)) + '(m)'
+        cv2.putText(imgWithLane, curvatureText, (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
+        cv2.putText(imgWithLane, self.formatVehiclePosition(), (20, 200), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
         return imgWithLane
         
 
@@ -464,7 +484,7 @@ from IPython.display import HTML
 # %%
 
 outputFname1 = 'output_videos/project_video.mp4'
-clip1 = VideoFileClip('project_video.mp4').subclip(0, 5)
+clip1 = VideoFileClip('project_video.mp4').subclip(0, 1)
 laneFinder = LaneFinder()
 processedClip1 = clip1.fl_image(laneFinder.processNextFrame)
 processedClip1.write_videofile(outputFname1, audio=False)
