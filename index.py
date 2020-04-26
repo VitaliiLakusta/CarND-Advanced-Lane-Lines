@@ -388,6 +388,8 @@ class Line():
         self.detected = False  
         # x values of the last n fits of the line
         self.recent_xfitted = []
+        self.last_xfitted = None
+        self.ploty = None
         #average x values of the fitted line over the last n iterations
         self.bestx = None     
         #polynomial coefficients averaged over the last n iterations
@@ -405,8 +407,14 @@ class Line():
         #y values for detected line pixels
         self.ally = None
 
+    def measureCurvatureRadiusOfCurrentFit(self):
+        ym_per_pix = 30/720
+        xm_per_pix = 3.7/700
+        fit_cr = np.polyfit(self.ploty*ym_per_pix, self.last_xfitted*xm_per_pix, 2)
+        y_eval = np.max(self.ploty)
+        self.radius_of_curvature = ((1 + (2*fit_cr[0]*y_eval*ym_per_pix+fit_cr[1])**2)**(3/2)) / abs(2*fit_cr[0])
 
-# TODO: calculate radius of a curvature
+
 # TODO: calculate position of a vehicle with respect to lane's center
 class LaneFinder():
     def __init__(self):
@@ -421,19 +429,30 @@ class LaneFinder():
         warped = cv2.warpPerspective(binaryFiltered, M, (xSize, ySize), flags=cv2.INTER_LINEAR)
 
         if self.leftLine.detected and self.rightLine.detected:
-            print("searching around poly")
             leftFitX, rightFitX, plotY, leftFit, rightFit = searchAroundPoly(warped, self.leftLine.current_fit, self.rightLine.current_fit)
         else:
-            print("searching from scratch")
             leftFitX, rightFitX, plotY, leftFit, rightFit = fitPolynomialFromScratch(warped)
         self.leftLine.current_fit = leftFit
         self.rightLine.current_fit = rightFit
+        self.leftLine.last_xfitted = leftFitX
+        self.leftLine.ploty = plotY
+        self.rightLine.last_xfitted = rightFitX
+        self.rightLine.ploty = plotY
         
         # TODO implement line detected/not detected algorithm
         self.leftLine.detected = True
         self.rightLine.detected = True
 
+        self.leftLine.measureCurvatureRadiusOfCurrentFit()
+        self.rightLine.measureCurvatureRadiusOfCurrentFit()
+
         imgWithLane = drawLane(undist, warped, MInv, leftFitX, rightFitX, plotY)
+
+        # print("L " + str(self.leftLine.radius_of_curvature) + " R " + str(self.rightLine.radius_of_curvature))
+        radiusOfCurvatureMean = np.mean([self.leftLine.radius_of_curvature, self.rightLine.radius_of_curvature])
+
+        text = 'Radius of Curvature = ' + str(radiusOfCurvatureMean) + '(m)'
+        cv2.putText(imgWithLane, text, (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
         return imgWithLane
         
 
