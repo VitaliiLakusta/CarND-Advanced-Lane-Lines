@@ -268,7 +268,8 @@ def findLanePixels(warpedImg):
 
     currentBaseLeft = leftBase
     currentBaseRight = rightBase
-    outImg = np.dstack((warpedImg,)*3) * 255
+    outImg = None
+    # outImg = np.dstack((warpedImg,)*3) * 255
     for window in range(nwindows):
         leftYBottom = rightYBottom = ySize - window * height
         leftYTop = rightYTop = ySize - (window+1) * height
@@ -277,8 +278,8 @@ def findLanePixels(warpedImg):
         rightXLeft = currentBaseRight - margin
         rightXRight = currentBaseRight + margin
 
-        cv2.rectangle(outImg,(leftXLeft,leftYBottom),(leftXRight,leftYTop),(0,255,0), 2)
-        cv2.rectangle(outImg,(rightXLeft,rightYBottom),(rightXRight,rightYTop),(0,0,255), 2)
+        # cv2.rectangle(outImg,(leftXLeft,leftYBottom),(leftXRight,leftYTop),(0,255,0), 2)
+        # cv2.rectangle(outImg,(rightXLeft,rightYBottom),(rightXRight,rightYTop),(0,0,255), 2)
 
         leftIndices = ((nonzerox >= leftXLeft) & (nonzerox < leftXRight) & (nonzeroy >= leftYTop) & (nonzeroy < leftYBottom)).nonzero()[0]
         rightIndices = ((nonzerox >= rightXLeft) & (nonzerox < rightXRight) & (nonzeroy >= rightYTop) & (nonzeroy < rightYBottom)).nonzero()[0]
@@ -300,25 +301,6 @@ def findLanePixels(warpedImg):
     rightY = nonzeroy[allRightLaneIndices]
     return leftX, leftY, rightX, rightY, outImg
 
-def fitPolynomial(warpedImg):
-    leftX, leftY, rightX, rightY, outImg = findLanePixels(warpedImg)
-    
-    leftFit = np.polyfit(leftY, leftX, 2)
-    rightFit = np.polyfit(rightY, rightX, 2)
-
-    ySize = warpedImg.shape[0]
-    plotY = np.linspace(0, ySize-1, ySize)
-    leftFitX = leftFit[0]*plotY**2 + leftFit[1]*plotY + leftFit[2]
-    rightFitX = rightFit[0]*plotY**2 + rightFit[1]*plotY + rightFit[2]
-
-    outImg[leftY, leftX] = [0, 255, 0]
-    outImg[rightY, rightX] = [0, 0, 255]
-
-    polyline1 = np.array(list(zip(leftFitX, plotY)))
-    polyline2 = np.array(list(zip(rightFitX, plotY)))
-    cv2.polylines(outImg, np.int32([polyline1, polyline2]), False, (255,255,0), thickness=4)
-    return leftFitX, rightFitX, plotY, outImg
-
 def fitPoly(imgShape, leftx, lefty, rightx, righty):
     # Fit a second order polynomial
     leftFit = np.polyfit(lefty, leftx, 2)
@@ -327,7 +309,19 @@ def fitPoly(imgShape, leftx, lefty, rightx, righty):
     plotY = np.linspace(0, imgShape[0]-1, imgShape[0])
     leftFitX = leftFit[0]*plotY**2 + leftFit[1]*plotY + leftFit[2]
     rightFitX = rightFit[0]*plotY**2 + rightFit[1]*plotY + rightFit[2]
-    return leftFitX, rightFitX, plotY
+    return leftFitX, rightFitX, plotY, leftFit, rightFit
+
+def fitPolynomialFromScratch(warpedImg):
+    leftX, leftY, rightX, rightY, outImg = findLanePixels(warpedImg)
+    
+    return fitPoly(warpedImg.shape, leftX, leftY, rightX, rightY)
+    # UNCOMMENT FOR DEBUGGING
+    # outImg[leftY, leftX] = [0, 255, 0]
+    # outImg[rightY, rightX] = [0, 0, 255]
+
+    # polyline1 = np.array(list(zip(leftFitX, plotY)))
+    # polyline2 = np.array(list(zip(rightFitX, plotY)))
+    # cv2.polylines(outImg, np.int32([polyline1, polyline2]), False, (255,255,0), thickness=4)
 
 def searchAroundPoly(warpedImg, leftFit, rightFit):
     margin = 100
@@ -356,7 +350,7 @@ show_images([imgWithLanePixels], [testRoadImgFnames[1]], save=False, save_prefix
 
 
 # %%
-leftFitX, rightFitX, plotY, imgWithPoly = fitPolynomial(warpedImgs[1])
+leftFitX, rightFitX, plotY, imgWithPoly = fitPolynomialFromScratch(warpedImgs[1])
 show_images([imgWithPoly], [testRoadImgFnames[1]], save=False, save_prefix='fitPoly_')
 
 # %%
@@ -378,7 +372,7 @@ def drawLane(undistImage, binaryWarped, Minv, leftFitX, rightFitX, plotY):
 
 # %% 
 
-fittedLanes = list(map(lambda warped: fitPolynomial(warped), warpedImgs))
+fittedLanes = list(map(lambda warped: fitPolynomialFromScratch(warped), warpedImgs))
 imgsWithLanes = []
 for i in range(len(testRoadImages)):
     imgsWithLanes.append(drawLane(testRoadImages[i], warpedImgs[i], MInv, fittedLanes[i][0], fittedLanes[i][1], fittedLanes[i][2]))
@@ -393,7 +387,7 @@ class Line():
         # was the line detected in the last iteration?
         self.detected = False  
         # x values of the last n fits of the line
-        self.recent_xfitted = [] 
+        self.recent_xfitted = []
         #average x values of the fitted line over the last n iterations
         self.bestx = None     
         #polynomial coefficients averaged over the last n iterations
@@ -412,20 +406,36 @@ class Line():
         self.ally = None
 
 
-#%% 
-# TODO: implement search from prior in polynomial fit
 # TODO: calculate radius of a curvature
 # TODO: calculate position of a vehicle with respect to lane's center
-def processImage(img):
-    undist = cv2.undistort(img, mtx, dist, None, mtx)
-    binaryFiltered = combinedGradAndColorThresh(undist)
-    xSize = img.shape[1]
-    ySize = img.shape[0]
-    warped = cv2.warpPerspective(binaryFiltered, M, (xSize, ySize), flags=cv2.INTER_LINEAR)
+class LaneFinder():
+    def __init__(self):
+        self.leftLine = Line()
+        self.rightLine = Line()
 
-    leftFitX, rightFitX, plotY, imgWithPoly = fitPolynomial(warped)
-    imgWithLane = drawLane(undist, warped, MInv, leftFitX, rightFitX, plotY)
-    return imgWithLane
+    def processNextFrame(self, img):
+        undist = cv2.undistort(img, mtx, dist, None, mtx)
+        binaryFiltered = combinedGradAndColorThresh(undist)
+        xSize = img.shape[1]
+        ySize = img.shape[0]
+        warped = cv2.warpPerspective(binaryFiltered, M, (xSize, ySize), flags=cv2.INTER_LINEAR)
+
+        if self.leftLine.detected and self.rightLine.detected:
+            print("searching around poly")
+            leftFitX, rightFitX, plotY, leftFit, rightFit = searchAroundPoly(warped, self.leftLine.current_fit, self.rightLine.current_fit)
+        else:
+            print("searching from scratch")
+            leftFitX, rightFitX, plotY, leftFit, rightFit = fitPolynomialFromScratch(warped)
+        self.leftLine.current_fit = leftFit
+        self.rightLine.current_fit = rightFit
+        
+        # TODO implement line detected/not detected algorithm
+        self.leftLine.detected = True
+        self.rightLine.detected = True
+
+        imgWithLane = drawLane(undist, warped, MInv, leftFitX, rightFitX, plotY)
+        return imgWithLane
+        
 
 # %%
 
@@ -436,7 +446,8 @@ from IPython.display import HTML
 
 outputFname1 = 'output_videos/project_video.mp4'
 clip1 = VideoFileClip('project_video.mp4').subclip(0, 5)
-processedClip1 = clip1.fl_image(processImage)
+laneFinder = LaneFinder()
+processedClip1 = clip1.fl_image(laneFinder.processNextFrame)
 processedClip1.write_videofile(outputFname1, audio=False)
 
 # %%
