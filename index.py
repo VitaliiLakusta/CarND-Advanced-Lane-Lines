@@ -388,7 +388,6 @@ class Line():
         self.detected = False  
         # x values of the last n fits of the line
         self.recent_xfitted = []
-        self.last_xfitted = None
         self.ploty = None
         #average x values of the fitted line over the last n iterations
         self.bestx = None     
@@ -407,10 +406,23 @@ class Line():
         #y values for detected line pixels
         self.ally = None
 
+    def addNewLineFit(self, imgShape, fitX, plotY, fit):
+        self.recent_xfitted.append(fitX)
+        self.recent_xfitted = self.recent_xfitted[-10:]
+        self.ploty = plotY
+        self.current_fit = fit
+        self.bestx = np.mean(self.recent_xfitted, axis=0)
+        self.best_fit = np.polyfit(plotY, self.bestx, 2)
+        self.measureCurvatureRadiusAndLineBasePos(imgShape)
+
+        # TODO: implement detected algo
+        self.detected = True
+
+
     def measureCurvatureRadiusAndLineBasePos(self, imgShape):
         ym_per_pix = 30/720
         xm_per_pix = 3.7/700
-        fit_cr = np.polyfit(self.ploty*ym_per_pix, self.last_xfitted*xm_per_pix, 2)
+        fit_cr = np.polyfit(self.ploty*ym_per_pix, self.bestx*xm_per_pix, 2)
         y_eval = np.max(self.ploty)
         self.radius_of_curvature = ((1 + (2*fit_cr[0]*y_eval*ym_per_pix+fit_cr[1])**2)**(3/2)) / abs(2*fit_cr[0])
 
@@ -449,28 +461,17 @@ class LaneFinder():
             leftFitX, rightFitX, plotY, leftFit, rightFit = searchAroundPoly(warped, self.leftLine.current_fit, self.rightLine.current_fit)
         else:
             leftFitX, rightFitX, plotY, leftFit, rightFit = fitPolynomialFromScratch(warped)
-        self.leftLine.current_fit = leftFit
-        self.rightLine.current_fit = rightFit
-        self.leftLine.last_xfitted = leftFitX
-        self.leftLine.ploty = plotY
-        self.rightLine.last_xfitted = rightFitX
-        self.rightLine.ploty = plotY
-        
-        # TODO implement line detected/not detected algorithm
-        self.leftLine.detected = True
-        self.rightLine.detected = True
 
-        self.leftLine.measureCurvatureRadiusAndLineBasePos(img.shape)
-        self.rightLine.measureCurvatureRadiusAndLineBasePos(img.shape)
-
+        self.leftLine.addNewLineFit(img.shape, leftFitX, plotY, leftFit)
+        self.rightLine.addNewLineFit(img.shape, rightFitX, plotY, rightFit)
         self.calculateVehicleCenterOffset()
 
-        imgWithLane = drawLane(undist, warped, MInv, leftFitX, rightFitX, plotY)
+        imgWithLane = drawLane(undist, warped, MInv, self.leftLine.bestx, self.rightLine.bestx, plotY)
 
         # print("L " + str(self.leftLine.radius_of_curvature) + " R " + str(self.rightLine.radius_of_curvature))
         radiusOfCurvatureMean = np.mean([self.leftLine.radius_of_curvature, self.rightLine.radius_of_curvature])
-
         curvatureText = 'Radius of Curvature = ' + str(round(radiusOfCurvatureMean, 2)) + '(m)'
+
         cv2.putText(imgWithLane, curvatureText, (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
         cv2.putText(imgWithLane, self.formatVehiclePosition(), (20, 200), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
         return imgWithLane
@@ -484,7 +485,7 @@ from IPython.display import HTML
 # %%
 
 outputFname1 = 'output_videos/project_video.mp4'
-clip1 = VideoFileClip('project_video.mp4').subclip(0, 1)
+clip1 = VideoFileClip('project_video.mp4').subclip(21, 25)
 laneFinder = LaneFinder()
 processedClip1 = clip1.fl_image(laneFinder.processNextFrame)
 processedClip1.write_videofile(outputFname1, audio=False)
