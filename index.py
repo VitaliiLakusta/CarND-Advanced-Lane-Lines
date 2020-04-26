@@ -207,10 +207,10 @@ show_images(threshImgs, testRoadImgFnames)
 
 def getTrapezoid():
     yBottom = 685
-    yTop = 445
+    yTop = 450
     xLeftBottom = 250
     xRightBottom = 1100
-    xOffset = 375
+    xOffset = 385
     xLeftUp = xLeftBottom + xOffset
     xRightUp = xRightBottom - xOffset
     return np.array([[xRightBottom,yBottom],[xLeftBottom,yBottom],[xLeftUp,yTop],[xRightUp,yTop]], np.int32)
@@ -219,7 +219,7 @@ def drawTrapezoid(img):
     return cv2.polylines(np.copy(img), [getTrapezoid()], True, (255,0,0), thickness=2)
 
 imgsWithTrapezoid = list(map(lambda img: drawTrapezoid(img), testRoadImagesUndist))
-show_images(imgsWithTrapezoid, testRoadImgFnames)
+show_images(imgsWithTrapezoid, testRoadImgFnames, save=False, save_prefix='trapezoid')
 
 
 # %%
@@ -227,7 +227,8 @@ s = testRoadImages[0].shape
 X = s[1]
 Y = s[0]
 srcPerspective = getTrapezoid().astype(np.float32)
-dstPerspective = np.float32([(X-200, Y), (200, Y), (200, 0), (X-200, 0)])
+warpXOffset = 350
+dstPerspective = np.float32([(X-warpXOffset, Y), (warpXOffset, Y), (warpXOffset, 0), (X-warpXOffset, 0)])
 M = cv2.getPerspectiveTransform(srcPerspective, dstPerspective)
 MInv = cv2.getPerspectiveTransform(dstPerspective, srcPerspective)
 
@@ -318,6 +319,36 @@ def fitPolynomial(warpedImg):
     cv2.polylines(outImg, np.int32([polyline1, polyline2]), False, (255,255,0), thickness=4)
     return leftFitX, rightFitX, plotY, outImg
 
+def fitPoly(imgShape, leftx, lefty, rightx, righty):
+    # Fit a second order polynomial
+    leftFit = np.polyfit(lefty, leftx, 2)
+    rightFit = np.polyfit(righty, rightx, 2)
+    # Generate x and y values for plotting
+    plotY = np.linspace(0, imgShape[0]-1, imgShape[0])
+    leftFitX = leftFit[0]*plotY**2 + leftFit[1]*plotY + leftFit[2]
+    rightFitX = rightFit[0]*plotY**2 + rightFit[1]*plotY + rightFit[2]
+    return leftFitX, rightFitX, plotY
+
+def searchAroundPoly(warpedImg, leftFit, rightFit):
+    margin = 100
+    nonzero = warpedImg.nonzero()
+    nonzeroy = np.array(nonzero[0])
+    nonzerox = np.array(nonzero[1])
+
+    leftLaneIndices = ((nonzerox >= leftFit[0]*nonzeroy**2 + leftFit[1]*nonzeroy + leftFit[2] - margin) & 
+                      (nonzerox <= leftFit[0]*nonzeroy**2 + leftFit[1]*nonzeroy + leftFit[2] + margin)).nonzero()[0]
+    rightLaneIndices = ((nonzerox >= rightFit[0]*nonzeroy**2 + rightFit[1]*nonzeroy + rightFit[2] - margin) & 
+                       (nonzerox <= rightFit[0]*nonzeroy**2 + rightFit[1]*nonzeroy + rightFit[2] + margin)).nonzero()[0]
+    
+    # Again, extract left and right line pixel positions
+    leftx = nonzerox[leftLaneIndices]
+    lefty = nonzeroy[leftLaneIndices] 
+    rightx = nonzerox[rightLaneIndices]
+    righty = nonzeroy[rightLaneIndices]
+
+    # Fit new polynomials
+    return fitPoly(warpedImg.shape, leftx, lefty, rightx, righty)
+
 
 # %%
 leftX, leftY, rightX, rightY, imgWithLanePixels = findLanePixels(warpedImgs[1])
@@ -356,9 +387,35 @@ show_images(imgsWithLanes, testRoadImgFnames, save=False, save_prefix='laneOnRoa
 
 # %% [markdown]
 ## Find lanes on video
+#%% 
+class Line():
+    def __init__(self):
+        # was the line detected in the last iteration?
+        self.detected = False  
+        # x values of the last n fits of the line
+        self.recent_xfitted = [] 
+        #average x values of the fitted line over the last n iterations
+        self.bestx = None     
+        #polynomial coefficients averaged over the last n iterations
+        self.best_fit = None  
+        #polynomial coefficients for the most recent fit
+        self.current_fit = [np.array([False])]  
+        #radius of curvature of the line in some units
+        self.radius_of_curvature = None 
+        #distance in meters of vehicle center from the line
+        self.line_base_pos = None 
+        #difference in fit coefficients between last and new fits
+        self.diffs = np.array([0,0,0], dtype='float') 
+        #x values for detected line pixels
+        self.allx = None  
+        #y values for detected line pixels
+        self.ally = None
+
 
 #%% 
+# TODO: implement search from prior in polynomial fit
 # TODO: calculate radius of a curvature
+# TODO: calculate position of a vehicle with respect to lane's center
 def processImage(img):
     undist = cv2.undistort(img, mtx, dist, None, mtx)
     binaryFiltered = combinedGradAndColorThresh(undist)
