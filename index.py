@@ -358,9 +358,17 @@ show_images(imgsWithLanes, testRoadImgFnames, save=False, save_prefix='laneOnRoa
 ## Find lanes on video
 
 #%% 
-# TODO: write process image function
+# TODO: calculate radius of a curvature
 def processImage(img):
-    return img
+    undist = cv2.undistort(img, mtx, dist, None, mtx)
+    binaryFiltered = combinedGradAndColorThresh(undist)
+    xSize = img.shape[1]
+    ySize = img.shape[0]
+    warped = cv2.warpPerspective(binaryFiltered, M, (xSize, ySize), flags=cv2.INTER_LINEAR)
+
+    leftFitX, rightFitX, plotY, imgWithPoly = fitPolynomial(warped)
+    imgWithLane = drawLane(undist, warped, MInv, leftFitX, rightFitX, plotY)
+    return imgWithLane
 
 # %%
 
@@ -370,8 +378,15 @@ from IPython.display import HTML
 # %%
 
 outputFname1 = 'output_videos/project_video.mp4'
-clip1 = VideoFileClip('project_video.mp4')
+clip1 = VideoFileClip('project_video.mp4').subclip(0, 5)
 processedClip1 = clip1.fl_image(processImage)
 processedClip1.write_videofile(outputFname1, audio=False)
+
+# %%
+HTML("""
+<video width="960" height="540" controls>
+  <source src="{0}">
+</video>
+""".format(outputFname1))
 
 # %%
