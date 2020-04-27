@@ -206,13 +206,12 @@ show_images(threshImgs, testRoadImgFnames)
 # Draw trapezoid, to see which params fit lanes best
 
 def getTrapezoid():
-    yBottom = 685
-    yTop = 450
-    xLeftBottom = 250
-    xRightBottom = 1100
-    xOffset = 385
-    xLeftUp = xLeftBottom + xOffset
-    xRightUp = xRightBottom - xOffset
+    yBottom = 681
+    yTop = 465
+    xLeftBottom = 258
+    xRightBottom = 1050
+    xLeftUp = 575
+    xRightUp = 710
     return np.array([[xRightBottom,yBottom],[xLeftBottom,yBottom],[xLeftUp,yTop],[xRightUp,yTop]], np.int32)
 
 def drawTrapezoid(img):
@@ -227,7 +226,7 @@ s = testRoadImages[0].shape
 X = s[1]
 Y = s[0]
 srcPerspective = getTrapezoid().astype(np.float32)
-warpXOffset = 350
+warpXOffset = 200
 dstPerspective = np.float32([(X-warpXOffset, Y), (warpXOffset, Y), (warpXOffset, 0), (X-warpXOffset, 0)])
 M = cv2.getPerspectiveTransform(srcPerspective, dstPerspective)
 MInv = cv2.getPerspectiveTransform(dstPerspective, srcPerspective)
@@ -247,7 +246,7 @@ def hist(img):
     histogram = np.sum(bottomHalf, axis=0)
     return histogram
 
-def findLanePixels(warpedImg):
+def findLanePixels(warpedImg, debug=False):
     histogram = hist(warpedImg)
     midpoint = histogram.shape[0]//2
     leftBase = np.argmax(histogram[:midpoint])
@@ -269,7 +268,8 @@ def findLanePixels(warpedImg):
     currentBaseLeft = leftBase
     currentBaseRight = rightBase
     outImg = None
-    # outImg = np.dstack((warpedImg,)*3) * 255
+    if debug:
+        outImg = np.dstack((warpedImg,)*3) * 255
     for window in range(nwindows):
         leftYBottom = rightYBottom = ySize - window * height
         leftYTop = rightYTop = ySize - (window+1) * height
@@ -278,8 +278,9 @@ def findLanePixels(warpedImg):
         rightXLeft = currentBaseRight - margin
         rightXRight = currentBaseRight + margin
 
-        # cv2.rectangle(outImg,(leftXLeft,leftYBottom),(leftXRight,leftYTop),(0,255,0), 2)
-        # cv2.rectangle(outImg,(rightXLeft,rightYBottom),(rightXRight,rightYTop),(0,0,255), 2)
+        if debug:
+            cv2.rectangle(outImg,(leftXLeft,leftYBottom),(leftXRight,leftYTop),(0,255,0), 2)
+            cv2.rectangle(outImg,(rightXLeft,rightYBottom),(rightXRight,rightYTop),(0,0,255), 2)
 
         leftIndices = ((nonzerox >= leftXLeft) & (nonzerox < leftXRight) & (nonzeroy >= leftYTop) & (nonzeroy < leftYBottom)).nonzero()[0]
         rightIndices = ((nonzerox >= rightXLeft) & (nonzerox < rightXRight) & (nonzeroy >= rightYTop) & (nonzeroy < rightYBottom)).nonzero()[0]
@@ -311,17 +312,18 @@ def fitPoly(imgShape, leftx, lefty, rightx, righty):
     rightFitX = rightFit[0]*plotY**2 + rightFit[1]*plotY + rightFit[2]
     return leftFitX, rightFitX, plotY, leftFit, rightFit
 
-def fitPolynomialFromScratch(warpedImg):
-    leftX, leftY, rightX, rightY, outImg = findLanePixels(warpedImg)
-    
-    return fitPoly(warpedImg.shape, leftX, leftY, rightX, rightY)
-    # UNCOMMENT FOR DEBUGGING
-    # outImg[leftY, leftX] = [0, 255, 0]
-    # outImg[rightY, rightX] = [0, 0, 255]
+def fitPolynomialFromScratch(warpedImg, debug=False):
+    leftX, leftY, rightX, rightY, outImg = findLanePixels(warpedImg, debug)
+    leftFitX, rightFitX, plotY, leftFit, rightFit = fitPoly(warpedImg.shape, leftX, leftY, rightX, rightY)
 
-    # polyline1 = np.array(list(zip(leftFitX, plotY)))
-    # polyline2 = np.array(list(zip(rightFitX, plotY)))
-    # cv2.polylines(outImg, np.int32([polyline1, polyline2]), False, (255,255,0), thickness=4)
+    if debug:
+        outImg[leftY, leftX] = [0, 255, 0]
+        outImg[rightY, rightX] = [0, 0, 255]
+
+        polyline1 = np.array(list(zip(leftFitX, plotY)))
+        polyline2 = np.array(list(zip(rightFitX, plotY)))
+        cv2.polylines(outImg, np.int32([polyline1, polyline2]), False, (255,255,0), thickness=4)
+    return leftFitX, rightFitX, plotY, leftFit, rightFit, outImg
 
 def searchAroundPoly(warpedImg, leftFit, rightFit):
     margin = 100
@@ -345,12 +347,12 @@ def searchAroundPoly(warpedImg, leftFit, rightFit):
 
 
 # %%
-leftX, leftY, rightX, rightY, imgWithLanePixels = findLanePixels(warpedImgs[1])
+leftX, leftY, rightX, rightY, imgWithLanePixels = findLanePixels(warpedImgs[1], debug=True)
 show_images([imgWithLanePixels], [testRoadImgFnames[1]], save=False, save_prefix='laneRectanglesAdjusted_')
 
 
 # %%
-leftFitX, rightFitX, plotY, imgWithPoly = fitPolynomialFromScratch(warpedImgs[1])
+leftFitX, rightFitX, plotY, leftFit, rightFit, imgWithPoly = fitPolynomialFromScratch(warpedImgs[1], debug=True)
 show_images([imgWithPoly], [testRoadImgFnames[1]], save=False, save_prefix='fitPoly_')
 
 # %%
@@ -460,7 +462,7 @@ class LaneFinder():
         if self.leftLine.detected and self.rightLine.detected:
             leftFitX, rightFitX, plotY, leftFit, rightFit = searchAroundPoly(warped, self.leftLine.current_fit, self.rightLine.current_fit)
         else:
-            leftFitX, rightFitX, plotY, leftFit, rightFit = fitPolynomialFromScratch(warped)
+            leftFitX, rightFitX, plotY, leftFit, rightFit, imgNone = fitPolynomialFromScratch(warped)
 
         self.leftLine.addNewLineFit(img.shape, leftFitX, plotY, leftFit)
         self.rightLine.addNewLineFit(img.shape, rightFitX, plotY, rightFit)
@@ -485,7 +487,7 @@ from IPython.display import HTML
 # %%
 
 outputFname1 = 'output_videos/project_video.mp4'
-clip1 = VideoFileClip('project_video.mp4').subclip(21, 25)
+clip1 = VideoFileClip('project_video.mp4')
 laneFinder = LaneFinder()
 processedClip1 = clip1.fl_image(laneFinder.processNextFrame)
 processedClip1.write_videofile(outputFname1, audio=False)
