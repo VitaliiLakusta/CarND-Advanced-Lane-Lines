@@ -30,6 +30,8 @@ import matplotlib.pyplot as plt
 import matplotlib.image as mpimg
 import glob
 import math
+from moviepy.editor import VideoFileClip
+from IPython.display import HTML
 
 
 # %%
@@ -127,6 +129,39 @@ show_images(testRoadImages, testRoadImgFnames)
 testRoadImagesUndist = list(map(lambda img: cv2.undistort(img, mtx, dist, None, mtx), testRoadImages))
 show_images(testRoadImagesUndist, testRoadImgFnames, save=False, save_prefix='undistorted_')
 
+# %% [markdown]
+# ## Apply Perspective Transform, Bird-Eye View
+
+# %%
+# Draw trapezoid, to see which params fit lanes best
+
+def getTrapezoid():
+    yBottom = 681
+    yTop = 465
+    xLeftBottom = 258
+    xRightBottom = 1050
+    xLeftUp = 575
+    xRightUp = 710
+    return np.array([[xRightBottom,yBottom],[xLeftBottom,yBottom],[xLeftUp,yTop],[xRightUp,yTop]], np.int32)
+
+def drawTrapezoid(img):
+    return cv2.polylines(np.copy(img), [getTrapezoid()], True, (255,0,0), thickness=2)
+
+imgsWithTrapezoid = list(map(lambda img: drawTrapezoid(img), testRoadImagesUndist))
+show_images(imgsWithTrapezoid, testRoadImgFnames, save=False, save_prefix='trapezoid')
+
+# %%
+s = testRoadImages[0].shape
+X = s[1]
+Y = s[0]
+srcPerspective = getTrapezoid().astype(np.float32)
+warpXOffset = 200
+dstPerspective = np.float32([(X-warpXOffset, Y), (warpXOffset, Y), (warpXOffset, 0), (X-warpXOffset, 0)])
+M = cv2.getPerspectiveTransform(srcPerspective, dstPerspective)
+MInv = cv2.getPerspectiveTransform(dstPerspective, srcPerspective)
+
+warpedOriginal = list(map(lambda img: cv2.warpPerspective(img, M, (X, Y), flags=cv2.INTER_LINEAR), testRoadImagesUndist))
+show_images(warpedOriginal, testRoadImgFnames, save=False, save_prefix='warpedOriginal_')
 
 # %%
 def absoluteSobelThresh(img, orient='x', sobelKernel=3, thresh=(0,255)):
@@ -201,54 +236,13 @@ def combinedGradAndColorThresh(img, debug=False):
 
 
 # %%
-threshImgsDebug = list(map(lambda img: combinedGradAndColorThresh(img, debug=True), testRoadImagesUndist))
+threshImgsDebug = list(map(lambda img: combinedGradAndColorThresh(img, debug=True), warpedOriginal))
 show_images(threshImgsDebug, testRoadImgFnames, save=False, save_prefix='combinedThreshDebug_')
 
 
 # %%
-threshImgs = list(map(lambda img: combinedGradAndColorThresh(img), testRoadImagesUndist))
+threshImgs = list(map(lambda img: combinedGradAndColorThresh(img), warpedOriginal))
 show_images(threshImgs, testRoadImgFnames)
-
-# %% [markdown]
-# ## Apply Perspective Transform, Bird-Eye View
-
-# %%
-# Draw trapezoid, to see which params fit lanes best
-
-def getTrapezoid():
-    yBottom = 681
-    yTop = 465
-    xLeftBottom = 258
-    xRightBottom = 1050
-    xLeftUp = 575
-    xRightUp = 710
-    return np.array([[xRightBottom,yBottom],[xLeftBottom,yBottom],[xLeftUp,yTop],[xRightUp,yTop]], np.int32)
-
-def drawTrapezoid(img):
-    return cv2.polylines(np.copy(img), [getTrapezoid()], True, (255,0,0), thickness=2)
-
-imgsWithTrapezoid = list(map(lambda img: drawTrapezoid(img), testRoadImagesUndist))
-show_images(imgsWithTrapezoid, testRoadImgFnames, save=False, save_prefix='trapezoid')
-
-
-# %%
-s = testRoadImages[0].shape
-X = s[1]
-Y = s[0]
-srcPerspective = getTrapezoid().astype(np.float32)
-warpXOffset = 200
-dstPerspective = np.float32([(X-warpXOffset, Y), (warpXOffset, Y), (warpXOffset, 0), (X-warpXOffset, 0)])
-M = cv2.getPerspectiveTransform(srcPerspective, dstPerspective)
-MInv = cv2.getPerspectiveTransform(dstPerspective, srcPerspective)
-
-warpedOriginal = list(map(lambda img: cv2.warpPerspective(img, M, (X, Y), flags=cv2.INTER_LINEAR), testRoadImagesUndist))
-show_images(warpedOriginal, testRoadImgFnames, save=False, save_prefix='warpedOriginal_')
-
-
-# %%
-warpedImgs = list(map(lambda img: cv2.warpPerspective(img, M, (X, Y), flags=cv2.INTER_LINEAR), threshImgs))
-show_images(warpedImgs, testRoadImgFnames, save=False, save_prefix='warpedThresh_')
-
 
 # %%
 def hist(img):
@@ -357,12 +351,12 @@ def searchAroundPoly(warpedImg, leftFit, rightFit):
 
 
 # %%
-leftX, leftY, rightX, rightY, imgWithLanePixels = findLanePixels(warpedImgs[1], debug=True)
+leftX, leftY, rightX, rightY, imgWithLanePixels = findLanePixels(threshImgs[4], debug=True)
 show_images([imgWithLanePixels], [testRoadImgFnames[1]], save=False, save_prefix='laneRectanglesAdjusted_')
 
 
 # %%
-leftFitX, rightFitX, plotY, leftFit, rightFit, imgWithPoly = fitPolynomialFromScratch(warpedImgs[1], debug=True)
+leftFitX, rightFitX, plotY, leftFit, rightFit, imgWithPoly = fitPolynomialFromScratch(threshImgs[4], debug=True)
 show_images([imgWithPoly], [testRoadImgFnames[1]], save=False, save_prefix='fitPoly_')
 
 # %%
@@ -384,10 +378,10 @@ def drawLane(undistImage, binaryWarped, Minv, leftFitX, rightFitX, plotY):
 
 # %% 
 
-fittedLanes = list(map(lambda warped: fitPolynomialFromScratch(warped), warpedImgs))
+fittedLanes = list(map(lambda warped: fitPolynomialFromScratch(warped), threshImgs))
 imgsWithLanes = []
 for i in range(len(testRoadImages)):
-    imgsWithLanes.append(drawLane(testRoadImages[i], warpedImgs[i], MInv, fittedLanes[i][0], fittedLanes[i][1], fittedLanes[i][2]))
+    imgsWithLanes.append(drawLane(testRoadImages[i], threshImgs[i], MInv, fittedLanes[i][0], fittedLanes[i][1], fittedLanes[i][2]))
 
 show_images(imgsWithLanes, testRoadImgFnames, save=False, save_prefix='laneOnRoad_')
 
@@ -406,7 +400,7 @@ class Line():
         #polynomial coefficients averaged over the last n iterations
         self.best_fit = None  
         #polynomial coefficients for the most recent fit
-        self.current_fit = [np.array([False])]  
+        self.current_fit = None
         #radius of curvature of the line in some units
         self.radius_of_curvature = None 
         #distance in meters of vehicle center from the line
@@ -437,7 +431,6 @@ class Line():
 
         self.xLanePosPix = self.best_fit[0]*yMax**2 + self.best_fit[1]*yMax + self.best_fit[2]
 
-# TODO: calculate position of a vehicle with respect to lane's center
 class LaneFinder():
     def __init__(self):
         self.imgShape = None
@@ -446,8 +439,8 @@ class LaneFinder():
         self.vehicleCenterOffset = None
 
     def calculateVehicleCenterOffset(self):
-        laneCenter = (self.leftLine.xLanePosPix + self.rightLine.xLanePosPix) / 2
         xm_per_pix = 3.7/700
+        laneCenter = (self.leftLine.xLanePosPix + self.rightLine.xLanePosPix) / 2
         midX = self.imgShape[1] / 2
         self.vehicleCenterOffset = (laneCenter - midX) * xm_per_pix
 
@@ -484,13 +477,16 @@ class LaneFinder():
 
         cv2.putText(imgWithLane, curvatureText, (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
         cv2.putText(imgWithLane, self.formatVehiclePosition(), (20, 200), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
+
+        debug=True
+        if debug:
+            xm_per_pix = 3.7/700
+            distBetweenLines = abs(self.leftLine.xLanePosPix - self.rightLine.xLanePosPix)*xm_per_pix
+            distBetweenLinesText = "distance between lines (m)" + str(round(distBetweenLines, 2))
+            cv2.putText(imgWithLane, distBetweenLinesText, (20, 260), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
+
         return imgWithLane
         
-
-# %%
-
-from moviepy.editor import VideoFileClip
-from IPython.display import HTML
 
 # %%
 
