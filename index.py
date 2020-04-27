@@ -403,14 +403,11 @@ class Line():
         self.line_base_pos = None 
         #difference in fit coefficients between last and new fits
         self.diffs = np.array([0,0,0], dtype='float') 
-        #x values for detected line pixels
-        self.allx = None  
-        #y values for detected line pixels
-        self.ally = None
+        self.xLanePosPix = None
 
     def addNewLineFit(self, imgShape, fitX, plotY, fit):
         self.recent_xfitted.append(fitX)
-        self.recent_xfitted = self.recent_xfitted[-10:]
+        self.recent_xfitted = self.recent_xfitted[-20:]
         self.ploty = plotY
         self.current_fit = fit
         self.bestx = np.mean(self.recent_xfitted, axis=0)
@@ -425,34 +422,35 @@ class Line():
         ym_per_pix = 30/720
         xm_per_pix = 3.7/700
         fit_cr = np.polyfit(self.ploty*ym_per_pix, self.bestx*xm_per_pix, 2)
-        y_eval = np.max(self.ploty)
-        self.radius_of_curvature = ((1 + (2*fit_cr[0]*y_eval*ym_per_pix+fit_cr[1])**2)**(3/2)) / abs(2*fit_cr[0])
+        yMax = np.max(self.ploty)
+        self.radius_of_curvature = ((1 + (2*fit_cr[0]*yMax*ym_per_pix+fit_cr[1])**2)**(3/2)) / abs(2*fit_cr[0])
 
-        xSizeMeters = imgShape[1]*xm_per_pix
-        midX = xSizeMeters // 2
-        lineStartYInMeters = np.max(self.ploty*ym_per_pix)
-        lineStartXInMeters = fit_cr[0]*lineStartYInMeters**2 + fit_cr[1]*lineStartYInMeters + fit_cr[2]
-        self.line_base_pos = abs(midX - lineStartXInMeters)
+        self.xLanePosPix = self.best_fit[0]*yMax**2 + self.best_fit[1]*yMax + self.best_fit[2]
 
 # TODO: calculate position of a vehicle with respect to lane's center
 class LaneFinder():
     def __init__(self):
+        self.imgShape = None
         self.leftLine = Line()
         self.rightLine = Line()
         self.vehicleCenterOffset = None
 
     def calculateVehicleCenterOffset(self):
-        self.vehicleCenterOffset = self.leftLine.line_base_pos - self.rightLine.line_base_pos
+        laneCenter = (self.leftLine.xLanePosPix + self.rightLine.xLanePosPix) / 2
+        xm_per_pix = 3.7/700
+        midX = self.imgShape[1] / 2
+        self.vehicleCenterOffset = (laneCenter - midX) * xm_per_pix
 
     def formatVehiclePosition(self):
-        text = "Vehicle is " + str(round(self.vehicleCenterOffset, 2)) + "m "
-        leftOrRight = "left"
+        leftOrRight = "right"
         if self.vehicleCenterOffset > 0:
-            leftOrRight = "right"
-        text = text + leftOrRight + " of center"
+            leftOrRight = "left"
+        text = "Vehicle is " + str(round(abs(self.vehicleCenterOffset), 2)) + "m " + leftOrRight + " of center"
         return text
 
     def processNextFrame(self, img):
+        if self.imgShape is None:
+            self.imgShape = img.shape
         undist = cv2.undistort(img, mtx, dist, None, mtx)
         binaryFiltered = combinedGradAndColorThresh(undist)
         xSize = img.shape[1]
@@ -487,7 +485,7 @@ from IPython.display import HTML
 # %%
 
 outputFname1 = 'output_videos/project_video.mp4'
-clip1 = VideoFileClip('project_video.mp4')
+clip1 = VideoFileClip('project_video.mp4').subclip(0,1)
 laneFinder = LaneFinder()
 processedClip1 = clip1.fl_image(laneFinder.processNextFrame)
 processedClip1.write_videofile(outputFname1, audio=False)
