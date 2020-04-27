@@ -3,15 +3,25 @@
 # %% [markdown]
 # ## Pipeline Description
 # 1. Calibrate images using chessboard images, get camera matrix and distortion coefficients.
-# 2. Undistort each frame in video using computed camera matrix and distortion coefficients.
-# 3. Filter out unnecessary noise in the image, focus on detecting lines:
+# 1. Undistort each frame in video using computed camera matrix and distortion coefficients.
+# 1. Filter out unnecessary noise in the image, focus on detecting lines:
 #     1. Apply gradient threshold.
 #     1. Apply color thresholding on S channel in HLS color space.
-# 4. Define region of interest, apply perspective transform to warp image into bird-eye view.
-# 5. Find the start of the lines using histogram peaks.
-# 6. Fit the polynomial by applying sliding window.
-# 7. Once polynomials exist from X previous frames, search lines from avg of prior polynomials within margin.
-# 8. If lines cannot be detected using search from prior, fallback to histogram peak & sliding window search again.
+# 1. Define region of interest, apply perspective transform to warp image into bird-eye view.
+# 1. Find the start of the lines using histogram peaks.
+# 1. Fit the polynomial by applying sliding window.
+# 1. Once polynomials exist from X previous frames, search lines from avg of prior polynomials within margin.
+# 1. If lines cannot be detected using search from prior, fallback to histogram peak & sliding window search again.
+
+# %% [markdown]
+
+# ### TODO: 
+# 1. Implement line outlier detection (check diffs of coefficients from prior fit)
+# 1. Visualize search from prior (margin around polynomial)
+# 1. Tune image filtering thresholds to better detect lines and remove noise
+# 1. Clean up the notebook: add descriptions, add/remove comments where necessary.
+# 1. Make sure all relevant output_images are there, to be included in a writeup. 
+
 
 # %%
 import numpy as np
@@ -485,7 +495,7 @@ from IPython.display import HTML
 # %%
 
 outputFname1 = 'output_videos/project_video.mp4'
-clip1 = VideoFileClip('project_video.mp4').subclip(0,1)
+clip1 = VideoFileClip('project_video.mp4')
 laneFinder = LaneFinder()
 processedClip1 = clip1.fl_image(laneFinder.processNextFrame)
 processedClip1.write_videofile(outputFname1, audio=False)
