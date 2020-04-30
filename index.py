@@ -1,5 +1,3 @@
-# To add a new cell, type '# %%'
-# To add a new markdown cell, type '# %% [markdown]'
 # %% [markdown]
 # ## Pipeline Description
 # 1. Calibrate images using chessboard images, get camera matrix and distortion coefficients.
@@ -14,14 +12,6 @@
 # 1. If lines cannot be detected using search from prior, fallback to histogram peak & sliding window search again.
 
 # %% [markdown]
-
-# ### TODO: 
-# 1. Implement line outlier detection (check diffs of coefficients from prior fit)
-# 1. Visualize search from prior (margin around polynomial)
-# 1. Tune image filtering thresholds to better detect lines and remove noise
-# 1. Clean up the notebook: add descriptions, add/remove comments where necessary.
-# 1. Make sure all relevant output_images are there, to be included in a writeup. 
-
 
 # %%
 import numpy as np
@@ -222,26 +212,29 @@ def hlsSChannelThresh(img, sThresh=(170, 255)):
     sBinary[(sChan >= sThresh[0]) & (sChan < sThresh[1])] = 1
     return sBinary
 
-def combinedGradAndColorThresh(img, debug=False):
+def combinedFiltering(img, debug=False):
     sChanThresh = hlsSChannelThresh(img)
     combinedGradient = combinedGradientThresh(img)
 
-    # s channel - red; gradient - green
+    gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+    whiteMask = cv2.inRange(gray, 220, 255) / 255
+
+    # s channel - red; white mask - green; gradient - blue, for debugging
     if debug == True:
-        combinedImg = (np.dstack((sChanThresh, combinedGradient, np.zeros_like(sChanThresh))) * 255).astype(np.uint8)
+        combinedImg = (np.dstack((sChanThresh, whiteMask, combinedGradient)) * 255).astype(np.uint8)
         return np.vstack((img, combinedImg))
     binary = np.zeros_like(sChanThresh).astype(np.uint8)
-    binary[(sChanThresh == 1) | (combinedGradient == 1)] = 1
+    binary[(sChanThresh == 1) | (whiteMask == 1)] = 1
     return binary
 
 
 # %%
-threshImgsDebug = list(map(lambda img: combinedGradAndColorThresh(img, debug=True), warpedOriginal))
+threshImgsDebug = list(map(lambda img: combinedFiltering(img, debug=True), warpedOriginal))
 show_images(threshImgsDebug, testRoadImgFnames, save=False, save_prefix='combinedThreshDebug_')
 
 
 # %%
-threshImgs = list(map(lambda img: combinedGradAndColorThresh(img), warpedOriginal))
+threshImgs = list(map(lambda img: combinedFiltering(img), warpedOriginal))
 show_images(threshImgs, testRoadImgFnames)
 
 # %%
@@ -440,13 +433,13 @@ class Line():
         if (self.diffs[0] <= 0.0003 and \
                 self.diffs[1] <= 0.1 and \
                 self.diffs[2] <= 150) or not self.detected:
-            self.detected = True
             self.current_fit = fit
             self.recent_xfitted.append(fitX)
             self.recent_xfitted = self.recent_xfitted[-20:]
             self.bestx = np.mean(self.recent_xfitted, axis=0)
             self.best_fit = np.polyfit(plotY, self.bestx, 2)
             self.measureCurvatureRadiusAndLineBasePos(imgShape)
+            self.detected = True
         else:
             self.detected = False
 
@@ -486,7 +479,7 @@ class LaneFinder():
 
         undist = cv2.undistort(img, mtx, dist, None, mtx)
         warped = cv2.warpPerspective(undist, M, (img.shape[1], img.shape[0]), flags=cv2.INTER_LINEAR)
-        binaryFiltered = combinedGradAndColorThresh(warped)
+        binaryFiltered = combinedFiltering(warped)
     
         distLinesLow = 2.5
         distLinesHigh = 3.9
@@ -517,18 +510,29 @@ class LaneFinder():
         radiusOfCurvatureMean = np.mean([self.leftLine.radius_of_curvature, self.rightLine.radius_of_curvature])
         curvatureText = 'Radius of Curvature = ' + str(round(radiusOfCurvatureMean, 2)) + '(m)'
 
-        cv2.putText(imgWithLane, curvatureText, (20, 100), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
-        cv2.putText(imgWithLane, self.formatVehiclePosition(), (20, 200), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
+        color=(0, 255, 0)
+        thick = 10
+        cv2.putText(imgWithLane, curvatureText, (20, 100), cv2.LINE_AA, 2, color, thick)
+        cv2.putText(imgWithLane, self.formatVehiclePosition(), (20, 200), cv2.LINE_AA, 2, color, thick)
 
-        debug=True
+        debug=False
         if debug:
-            distBetweenLinesText = "distance between lines (m)" + str(round(distBetweenLinesMeters, 2))
-            cv2.putText(imgWithLane, distBetweenLinesText, (20, 260), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
-            cv2.putText(imgWithLane, "L Prior " + str(leftLinePriorSearch), (20, 320), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
-            cv2.putText(imgWithLane, "R Prior " + str(rightLinePriorSearch), (500, 320), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
+            distBetweenLinesText = "Distance between lines (m)" + str(round(distBetweenLinesMeters, 2))
+            cv2.putText(imgWithLane, distBetweenLinesText, (20, 260), cv2.LINE_AA, 2, color, thick)
+            cv2.putText(imgWithLane, "L Prior " + str(leftLinePriorSearch), (20, 320), cv2.LINE_AA, 2, color, thick)
+            cv2.putText(imgWithLane, "R Prior " + str(rightLinePriorSearch), (500, 320), cv2.LINE_AA, 2, color, thick)
 
         return imgWithLane
         
+
+# %%
+
+processedImgs = []
+for i in range(len(testRoadImages)):
+    laneFinder = LaneFinder()
+    processedImgs.append(laneFinder.processNextFrame(testRoadImages[i]))
+
+show_images(processedImgs, testRoadImgFnames, save=True, save_prefix='processedFinal_')
 
 # %%
 
