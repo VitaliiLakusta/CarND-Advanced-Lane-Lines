@@ -433,20 +433,20 @@ class Line():
         self.xLanePosPix = None
 
     def addNewLineFit(self, imgShape, fitX, plotY, fit):
-        self.recent_xfitted.append(fitX)
-        self.recent_xfitted = self.recent_xfitted[-20:]
         self.ploty = plotY
         if self.current_fit is not None:
             self.diffs = np.absolute(self.current_fit - fit)
-        self.current_fit = fit
-        self.bestx = np.mean(self.recent_xfitted, axis=0)
-        self.best_fit = np.polyfit(plotY, self.bestx, 2)
-        self.measureCurvatureRadiusAndLineBasePos(imgShape)
 
-        if (self.diffs[0] > 0 and self.diffs[0] <= 0.0003 and \
-            self.diffs[1] <= 0.1 and \
-            self.diffs[2] <= 150):
+        if (self.diffs[0] <= 0.0003 and \
+                self.diffs[1] <= 0.1 and \
+                self.diffs[2] <= 150) or not self.detected:
             self.detected = True
+            self.current_fit = fit
+            self.recent_xfitted.append(fitX)
+            self.recent_xfitted = self.recent_xfitted[-20:]
+            self.bestx = np.mean(self.recent_xfitted, axis=0)
+            self.best_fit = np.polyfit(plotY, self.bestx, 2)
+            self.measureCurvatureRadiusAndLineBasePos(imgShape)
         else:
             self.detected = False
 
