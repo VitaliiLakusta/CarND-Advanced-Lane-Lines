@@ -556,10 +556,10 @@ show_images(processedImgs, testRoadImgFnames, save=False, save_prefix='processed
 # %%
 
 outputFname1 = 'project_video_output.mp4'
-clip1 = VideoFileClip('project_video.mp4')
-laneFinder = LaneFinder()
-processedClip1 = clip1.fl_image(laneFinder.processNextFrame)
-processedClip1.write_videofile(outputFname1, audio=False)
+# clip1 = VideoFileClip('project_video.mp4')
+# laneFinder = LaneFinder()
+# processedClip1 = clip1.fl_image(laneFinder.processNextFrame)
+# processedClip1.write_videofile(outputFname1, audio=False)
 
 # %%
 HTML("""
