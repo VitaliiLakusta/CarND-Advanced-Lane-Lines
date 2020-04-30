@@ -155,7 +155,7 @@ s = testRoadImages[0].shape
 X = s[1]
 Y = s[0]
 srcPerspective = getTrapezoid().astype(np.float32)
-warpXOffset = 200
+warpXOffset = 320
 dstPerspective = np.float32([(X-warpXOffset, Y), (warpXOffset, Y), (warpXOffset, 0), (X-warpXOffset, 0)])
 M = cv2.getPerspectiveTransform(srcPerspective, dstPerspective)
 MInv = cv2.getPerspectiveTransform(dstPerspective, srcPerspective)
@@ -360,6 +360,10 @@ leftFitX, rightFitX, plotY, leftFit, rightFit, imgWithPoly = fitPolynomialFromSc
 show_images([imgWithPoly], [testRoadImgFnames[1]], save=False, save_prefix='fitPoly_')
 
 # %%
+print("left fit", leftFit)
+print("right fit", rightFit)
+
+# %%
 
 def drawLane(undistImage, binaryWarped, Minv, leftFitX, rightFitX, plotY):
     warp_zero = np.zeros_like(binaryWarped).astype(np.uint8)
@@ -386,12 +390,31 @@ for i in range(len(testRoadImages)):
 show_images(imgsWithLanes, testRoadImgFnames, save=False, save_prefix='laneOnRoad_')
 
 # %% [markdown]
+# ## Outliers Detection. Check fit coefficients
+# Getting intuition on line outlier detection.
+
+# %%
+leftFits = [];
+rightFits = [];
+for i in range(len(fittedLanes)):
+    leftFits.append(fittedLanes[i][3])
+    rightFits.append(fittedLanes[i][4])
+    print("left fit", fittedLanes[i][3])
+    print("right fit", fittedLanes[i][4])
+    print("diff", np.absolute(fittedLanes[i][3] - fittedLanes[i][4]))
+    print("---------")
+print("----------")
+print("----------")
+print("all left fits", np.array(leftFits))
+print("all right fits", np.array(leftFits))
+
+# %% [markdown]
 ## Find lanes on video
 #%% 
 class Line():
     def __init__(self):
         # was the line detected in the last iteration?
-        self.detected = False  
+        self.detected = False
         # x values of the last n fits of the line
         self.recent_xfitted = []
         self.ploty = None
@@ -413,14 +436,19 @@ class Line():
         self.recent_xfitted.append(fitX)
         self.recent_xfitted = self.recent_xfitted[-20:]
         self.ploty = plotY
+        if self.current_fit is not None:
+            self.diffs = np.absolute(self.current_fit - fit)
         self.current_fit = fit
         self.bestx = np.mean(self.recent_xfitted, axis=0)
         self.best_fit = np.polyfit(plotY, self.bestx, 2)
         self.measureCurvatureRadiusAndLineBasePos(imgShape)
 
-        # TODO: implement detected algo
-        self.detected = True
-
+        if (self.diffs[0] > 0 and self.diffs[0] <= 0.0003 and \
+            self.diffs[1] <= 0.1 and \
+            self.diffs[2] <= 150):
+            self.detected = True
+        else:
+            self.detected = False
 
     def measureCurvatureRadiusAndLineBasePos(self, imgShape):
         ym_per_pix = 30/720
@@ -452,24 +480,38 @@ class LaneFinder():
         return text
 
     def processNextFrame(self, img):
+        xm_per_pix = 3.7/700
         if self.imgShape is None:
             self.imgShape = img.shape
-        undist = cv2.undistort(img, mtx, dist, None, mtx)
-        binaryFiltered = combinedGradAndColorThresh(undist)
-        xSize = img.shape[1]
-        ySize = img.shape[0]
-        warped = cv2.warpPerspective(binaryFiltered, M, (xSize, ySize), flags=cv2.INTER_LINEAR)
 
-        if self.leftLine.detected and self.rightLine.detected:
-            leftFitX, rightFitX, plotY, leftFit, rightFit = searchAroundPoly(warped, self.leftLine.current_fit, self.rightLine.current_fit)
+        undist = cv2.undistort(img, mtx, dist, None, mtx)
+        warped = cv2.warpPerspective(undist, M, (img.shape[1], img.shape[0]), flags=cv2.INTER_LINEAR)
+        binaryFiltered = combinedGradAndColorThresh(warped)
+    
+        distLinesLow = 2.5
+        distLinesHigh = 3.9
+        distBetweenLinesMeters = 3
+        if self.leftLine.xLanePosPix is not None and self.rightLine.xLanePosPix is not None:
+            distBetweenLinesMeters = abs(self.leftLine.xLanePosPix - self.rightLine.xLanePosPix)*xm_per_pix
+        leftLinePriorSearch = False;
+        rightLinePriorSearch = False;
+        if self.leftLine.detected and distBetweenLinesMeters >= distLinesLow and distBetweenLinesMeters <= distLinesHigh:
+            leftLinePriorSearch = True;
+            leftFitX, _, plotY, leftFit, _ = searchAroundPoly(binaryFiltered, self.leftLine.current_fit, self.rightLine.current_fit)
         else:
-            leftFitX, rightFitX, plotY, leftFit, rightFit, imgNone = fitPolynomialFromScratch(warped)
+            leftFitX, _, plotY, leftFit, _, _ = fitPolynomialFromScratch(binaryFiltered)
+
+        if self.rightLine.detected and distBetweenLinesMeters >= distLinesLow and distBetweenLinesMeters <= distLinesHigh:
+            rightLinePriorSearch = True;
+            _, rightFitX, _, _, rightFit = searchAroundPoly(binaryFiltered, self.leftLine.current_fit, self.rightLine.current_fit)
+        else:
+            _, rightFitX, _, _, rightFit, _ = fitPolynomialFromScratch(binaryFiltered)
 
         self.leftLine.addNewLineFit(img.shape, leftFitX, plotY, leftFit)
         self.rightLine.addNewLineFit(img.shape, rightFitX, plotY, rightFit)
         self.calculateVehicleCenterOffset()
 
-        imgWithLane = drawLane(undist, warped, MInv, self.leftLine.bestx, self.rightLine.bestx, plotY)
+        imgWithLane = drawLane(undist, binaryFiltered, MInv, self.leftLine.bestx, self.rightLine.bestx, plotY)
 
         # print("L " + str(self.leftLine.radius_of_curvature) + " R " + str(self.rightLine.radius_of_curvature))
         radiusOfCurvatureMean = np.mean([self.leftLine.radius_of_curvature, self.rightLine.radius_of_curvature])
@@ -480,10 +522,10 @@ class LaneFinder():
 
         debug=True
         if debug:
-            xm_per_pix = 3.7/700
-            distBetweenLines = abs(self.leftLine.xLanePosPix - self.rightLine.xLanePosPix)*xm_per_pix
-            distBetweenLinesText = "distance between lines (m)" + str(round(distBetweenLines, 2))
+            distBetweenLinesText = "distance between lines (m)" + str(round(distBetweenLinesMeters, 2))
             cv2.putText(imgWithLane, distBetweenLinesText, (20, 260), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
+            cv2.putText(imgWithLane, "L Prior " + str(leftLinePriorSearch), (20, 320), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
+            cv2.putText(imgWithLane, "R Prior " + str(rightLinePriorSearch), (500, 320), cv2.FONT_HERSHEY_SIMPLEX, 2, 255)
 
         return imgWithLane
         
