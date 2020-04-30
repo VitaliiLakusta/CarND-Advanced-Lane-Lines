@@ -1,15 +1,19 @@
 # %% [markdown]
+# # Advanced Lane Line Finding
+
+# %% [markdown]
 # ## Pipeline Description
 # 1. Calibrate images using chessboard images, get camera matrix and distortion coefficients.
 # 1. Undistort each frame in video using computed camera matrix and distortion coefficients.
+# 1. Define trapezoid which fits a lane, apply perspective transform to warp image into bird-eye view.
 # 1. Filter out unnecessary noise in the image, focus on detecting lines:
-#     1. Apply gradient threshold.
-#     1. Apply color thresholding on S channel in HLS color space.
-# 1. Define region of interest, apply perspective transform to warp image into bird-eye view.
+#     1. Apply color thresholding on S channel in HLS color space, separates yellow color well.
+#     1. Apply mask to filter out white color, separates white color well.
+#     1. (Gradient filtering was also tried, but found 2 methods above to work well in my case).
 # 1. Find the start of the lines using histogram peaks.
 # 1. Fit the polynomial by applying sliding window.
-# 1. Once polynomials exist from X previous frames, search lines from avg of prior polynomials within margin.
-# 1. If lines cannot be detected using search from prior, fallback to histogram peak & sliding window search again.
+# 1. Once polynomial exists from a previous frame, search line pixels from prior polynomial within a margin.
+# 1. If detected line is not good (outlier), fallback to histogram peak & sliding window search again.
 
 # %% [markdown]
 
@@ -63,7 +67,6 @@ patternSize = (nx, ny)
 objp = np.zeros((nx*ny, 3), np.float32)
 objp[:,:2] = np.mgrid[0:nx,0:ny].T.reshape(-1, 2)
 
-
 # %%
 calibFileNames = glob.glob('camera_cal/calibration*.jpg')
 cornersNotFoundCount = 0
@@ -97,7 +100,7 @@ imgSizeXY = (lastImgWithCorners.shape[1], lastImgWithCorners.shape[0])
 ret, mtx, dist, rvecs, tvecs = cv2.calibrateCamera(objpoints, imgpoints, imgSizeXY, None, None)
 
 # %% [markdown]
-# ### Test image undistortion
+# ### Camera Calibration: Test image undistortion
 
 # %%
 distortedImg = mpimg.imread('camera_cal/calibration1.jpg')
@@ -105,7 +108,7 @@ undist = cv2.undistort(distortedImg, mtx, dist, None, mtx)
 show_images([distortedImg, undist], ['Distorted', 'Undistorted'])
 
 # %% [markdown]
-# ## Gradient Threshold on Test Road Images
+# ## Test Road Images - Original
 
 # %%
 testRoadImgFnames = glob.glob('test_images/test*.jpg')
@@ -113,14 +116,14 @@ testRoadImages = list(map(lambda fname: mpimg.imread(fname), testRoadImgFnames))
 show_images(testRoadImages, testRoadImgFnames)
 
 # %% [markdown]
-## Undistort Images
+# ## Test Road Images - Undistorted
 
 #%% 
 testRoadImagesUndist = list(map(lambda img: cv2.undistort(img, mtx, dist, None, mtx), testRoadImages))
 show_images(testRoadImagesUndist, testRoadImgFnames, save=False, save_prefix='undistorted_')
 
 # %% [markdown]
-# ## Apply Perspective Transform, Bird-Eye View
+# ## Perspective Transform: Define Trapezoid
 
 # %%
 # Draw trapezoid, to see which params fit lanes best
@@ -140,6 +143,9 @@ def drawTrapezoid(img):
 imgsWithTrapezoid = list(map(lambda img: drawTrapezoid(img), testRoadImagesUndist))
 show_images(imgsWithTrapezoid, testRoadImgFnames, save=False, save_prefix='trapezoid')
 
+# %% [markdown]
+# ## Perspective Transform: Warp Undistorted Images
+
 # %%
 s = testRoadImages[0].shape
 X = s[1]
@@ -152,6 +158,9 @@ MInv = cv2.getPerspectiveTransform(dstPerspective, srcPerspective)
 
 warpedOriginal = list(map(lambda img: cv2.warpPerspective(img, M, (X, Y), flags=cv2.INTER_LINEAR), testRoadImagesUndist))
 show_images(warpedOriginal, testRoadImgFnames, save=False, save_prefix='warpedOriginal_')
+
+# %% [markdown]
+# ## Perspective Transform: Apply HLS S Channel Filtering, White Mask, Gradients Thresholds
 
 # %%
 def absoluteSobelThresh(img, orient='x', sobelKernel=3, thresh=(0,255)):
@@ -236,6 +245,9 @@ show_images(threshImgsDebug, testRoadImgFnames, save=False, save_prefix='combine
 # %%
 threshImgs = list(map(lambda img: combinedFiltering(img), warpedOriginal))
 show_images(threshImgs, testRoadImgFnames)
+
+# %% [markdown]
+# ## Detect Left & Right Lines, Fit Polynomial
 
 # %%
 def hist(img):
@@ -342,22 +354,26 @@ def searchAroundPoly(warpedImg, leftFit, rightFit):
     # Fit new polynomials
     return fitPoly(warpedImg.shape, leftx, lefty, rightx, righty)
 
-
+# %% [markdown]
+# ### Find start of a line using histogram peak, then apply sliding window
 # %%
 leftX, leftY, rightX, rightY, imgWithLanePixels = findLanePixels(threshImgs[4], debug=True)
 show_images([imgWithLanePixels], [testRoadImgFnames[1]], save=False, save_prefix='laneRectanglesAdjusted_')
 
+# %% [markdown]
+# ### Fit polynomial to detected line pixels.
+# We treat y axis as free variable for our polynomial, since fit is vertical
 
 # %%
 leftFitX, rightFitX, plotY, leftFit, rightFit, imgWithPoly = fitPolynomialFromScratch(threshImgs[4], debug=True)
 show_images([imgWithPoly], [testRoadImgFnames[1]], save=False, save_prefix='fitPoly_')
-
-# %%
 print("left fit", leftFit)
 print("right fit", rightFit)
 
-# %%
 
+# %% [markdown]
+# ## Draw Lane
+# %%
 def drawLane(undistImage, binaryWarped, Minv, leftFitX, rightFitX, plotY):
     warp_zero = np.zeros_like(binaryWarped).astype(np.uint8)
     colorWarp = np.dstack((warp_zero, warp_zero, warp_zero))
@@ -373,19 +389,14 @@ def drawLane(undistImage, binaryWarped, Minv, leftFitX, rightFitX, plotY):
     result = cv2.addWeighted(undistImage, 1, newWarp, 0.3, 0)
     return result
 
-# %% 
-
 fittedLanes = list(map(lambda warped: fitPolynomialFromScratch(warped), threshImgs))
 imgsWithLanes = []
 for i in range(len(testRoadImages)):
     imgsWithLanes.append(drawLane(testRoadImages[i], threshImgs[i], MInv, fittedLanes[i][0], fittedLanes[i][1], fittedLanes[i][2]))
-
 show_images(imgsWithLanes, testRoadImgFnames, save=False, save_prefix='laneOnRoad_')
 
 # %% [markdown]
-# ## Outliers Detection. Check fit coefficients
-# Getting intuition on line outlier detection.
-
+# ## Line Outliers Detection: Get Intuition on Coefficients
 # %%
 leftFits = [];
 rightFits = [];
@@ -402,8 +413,11 @@ print("all left fits", np.array(leftFits))
 print("all right fits", np.array(leftFits))
 
 # %% [markdown]
-## Find lanes on video
+# ## Find Lane on Video: Complete Pipeline
 #%% 
+
+ym_per_pix = 30/720
+xm_per_pix = 3.7/700
 class Line():
     def __init__(self):
         # was the line detected in the last iteration?
@@ -419,8 +433,6 @@ class Line():
         self.current_fit = None
         #radius of curvature of the line in some units
         self.radius_of_curvature = None 
-        #distance in meters of vehicle center from the line
-        self.line_base_pos = None 
         #difference in fit coefficients between last and new fits
         self.diffs = np.array([0,0,0], dtype='float') 
         self.xLanePosPix = None
@@ -430,6 +442,7 @@ class Line():
         if self.current_fit is not None:
             self.diffs = np.absolute(self.current_fit - fit)
 
+        # check if detected line is OK or not
         if (self.diffs[0] <= 0.0003 and \
                 self.diffs[1] <= 0.1 and \
                 self.diffs[2] <= 150) or not self.detected:
@@ -444,8 +457,6 @@ class Line():
             self.detected = False
 
     def measureCurvatureRadiusAndLineBasePos(self, imgShape):
-        ym_per_pix = 30/720
-        xm_per_pix = 3.7/700
         fit_cr = np.polyfit(self.ploty*ym_per_pix, self.bestx*xm_per_pix, 2)
         yMax = np.max(self.ploty)
         self.radius_of_curvature = ((1 + (2*fit_cr[0]*yMax*ym_per_pix+fit_cr[1])**2)**(3/2)) / abs(2*fit_cr[0])
@@ -460,7 +471,6 @@ class LaneFinder():
         self.vehicleCenterOffset = None
 
     def calculateVehicleCenterOffset(self):
-        xm_per_pix = 3.7/700
         laneCenter = (self.leftLine.xLanePosPix + self.rightLine.xLanePosPix) / 2
         midX = self.imgShape[1] / 2
         self.vehicleCenterOffset = (laneCenter - midX) * xm_per_pix
@@ -473,7 +483,6 @@ class LaneFinder():
         return text
 
     def processNextFrame(self, img):
-        xm_per_pix = 3.7/700
         if self.imgShape is None:
             self.imgShape = img.shape
 
@@ -488,33 +497,40 @@ class LaneFinder():
             distBetweenLinesMeters = abs(self.leftLine.xLanePosPix - self.rightLine.xLanePosPix)*xm_per_pix
         leftLinePriorSearch = False;
         rightLinePriorSearch = False;
+
+        # decide either to search around previous polynomial or start line search from scratch
         if self.leftLine.detected and distBetweenLinesMeters >= distLinesLow and distBetweenLinesMeters <= distLinesHigh:
             leftLinePriorSearch = True;
             leftFitX, _, plotY, leftFit, _ = searchAroundPoly(binaryFiltered, self.leftLine.current_fit, self.rightLine.current_fit)
         else:
             leftFitX, _, plotY, leftFit, _, _ = fitPolynomialFromScratch(binaryFiltered)
 
+        # decide either to search around previous polynomial or start line search from scratch
         if self.rightLine.detected and distBetweenLinesMeters >= distLinesLow and distBetweenLinesMeters <= distLinesHigh:
             rightLinePriorSearch = True;
             _, rightFitX, _, _, rightFit = searchAroundPoly(binaryFiltered, self.leftLine.current_fit, self.rightLine.current_fit)
         else:
             _, rightFitX, _, _, rightFit, _ = fitPolynomialFromScratch(binaryFiltered)
 
+        # add new fits to lines objects
         self.leftLine.addNewLineFit(img.shape, leftFitX, plotY, leftFit)
         self.rightLine.addNewLineFit(img.shape, rightFitX, plotY, rightFit)
+
         self.calculateVehicleCenterOffset()
 
+        # draw lane
         imgWithLane = drawLane(undist, binaryFiltered, MInv, self.leftLine.bestx, self.rightLine.bestx, plotY)
-
-        # print("L " + str(self.leftLine.radius_of_curvature) + " R " + str(self.rightLine.radius_of_curvature))
-        radiusOfCurvatureMean = np.mean([self.leftLine.radius_of_curvature, self.rightLine.radius_of_curvature])
-        curvatureText = 'Radius of Curvature = ' + str(round(radiusOfCurvatureMean, 2)) + '(m)'
 
         color=(0, 255, 0)
         thick = 10
+
+        radiusOfCurvatureMean = np.mean([self.leftLine.radius_of_curvature, self.rightLine.radius_of_curvature])
+        curvatureText = 'Radius of Curvature = ' + str(round(radiusOfCurvatureMean, 2)) + '(m)'
         cv2.putText(imgWithLane, curvatureText, (20, 100), cv2.LINE_AA, 2, color, thick)
+
         cv2.putText(imgWithLane, self.formatVehiclePosition(), (20, 200), cv2.LINE_AA, 2, color, thick)
 
+        # used for debugging
         debug=False
         if debug:
             distBetweenLinesText = "Distance between lines (m)" + str(round(distBetweenLinesMeters, 2))
@@ -525,18 +541,21 @@ class LaneFinder():
         return imgWithLane
         
 
-# %%
+# %% [markdown]
+# ## Test Complete Pipeline on Test Images
 
+# %%
 processedImgs = []
 for i in range(len(testRoadImages)):
     laneFinder = LaneFinder()
     processedImgs.append(laneFinder.processNextFrame(testRoadImages[i]))
+show_images(processedImgs, testRoadImgFnames, save=False, save_prefix='processedFinal_')
 
-show_images(processedImgs, testRoadImgFnames, save=True, save_prefix='processedFinal_')
-
+# %% [markdown]
+# ## Find Lanes on Video
 # %%
 
-outputFname1 = 'output_videos/project_video.mp4'
+outputFname1 = 'project_video_output.mp4'
 clip1 = VideoFileClip('project_video.mp4')
 laneFinder = LaneFinder()
 processedClip1 = clip1.fl_image(laneFinder.processNextFrame)
