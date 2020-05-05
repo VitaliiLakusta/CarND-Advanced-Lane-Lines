@@ -1,5 +1,7 @@
 # Advanced Lane Finding Project
 
+![final_image_output](./output_images/processedFinal_test1.jpg)
+
 ## Overview
 This is project 2 from Udacity's Self-Driving Car Engineer Nanodegree program.
 
